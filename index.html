@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EMR-Typer หน้าส่ง</title>
+<style>
+:root{
+  --bg:#F3F6F7; --surface:#FFFFFF; --ink:#15202C; --muted:#586676; --line:#D3DBE1;
+  --go:#22665A; --go-ink:#FFFFFF; --live:#2456C4; --stop:#B3352E; --done:#1F7A4D;
+  --flag-bg:#FFF3DC; --flag:#8A5A06;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E141A; --surface:#17202A; --ink:#E5EBF0; --muted:#98A6B4; --line:#2A3643;
+    --go:#3F9D88; --go-ink:#04110D; --live:#7BA2FF; --stop:#F2766C; --done:#5BC48D;
+    --flag-bg:#2A2010; --flag:#F2B84E;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E141A; --surface:#17202A; --ink:#E5EBF0; --muted:#98A6B4; --line:#2A3643;
+  --go:#3F9D88; --go-ink:#04110D; --live:#7BA2FF; --stop:#F2766C; --done:#5BC48D;
+  --flag-bg:#2A2010; --flag:#F2B84E;
+  color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Leelawadee UI","Noto Sans Thai","Sukhumvit Set",Tahoma,system-ui,sans-serif;
+  font-size:16px; line-height:1.6}
+main{max-width:720px; margin:0 auto; padding:18px 16px 32px}
+h1{font-size:1.35rem; margin:0 0 4px; font-weight:600}
+.lede{color:var(--muted); margin:0 0 16px; font-size:.94rem}
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:14px}
+.conn{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.dot{width:12px; height:12px; border-radius:50%; background:#8A96A3; flex:none}
+.dot.on{background:#2FB37E} .dot.wait{background:#E0A93A}
+button{font:inherit; font-weight:500; border-radius:10px; padding:10px 16px; cursor:pointer;
+  border:1px solid var(--line); background:var(--surface); color:var(--ink); min-height:46px}
+button:disabled{opacity:.45; cursor:not-allowed}
+button:focus-visible, textarea:focus-visible{outline:3px solid var(--live); outline-offset:2px}
+.primary{background:var(--go); color:var(--go-ink); border-color:var(--go)}
+.wide{width:100%}
+.row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px}
+#pasteBox{width:100%; max-width:100%; margin-top:10px; border:1px dashed var(--line); border-radius:10px;
+  background:var(--bg); color:var(--ink); padding:10px; font:inherit; min-height:90px}
+#msg{margin-top:10px; font-size:.94rem; min-height:1.4em}
+.sec{border-top:1px solid var(--line); padding:12px 0}
+.sec:first-child{border-top:none; padding-top:2px}
+.sec.next{box-shadow:inset 4px 0 0 var(--live); padding-left:12px}
+.sec.warn pre{border-color:var(--stop); border-width:2px}
+.head{display:flex; align-items:baseline; gap:8px; margin-bottom:6px}
+.head strong{font-size:1rem}
+.state{margin-left:auto; font-size:.86rem; color:var(--muted)}
+.state.done{color:var(--done); font-weight:500}
+.state.typing{color:var(--live); font-weight:500}
+.state.warn{color:var(--stop); font-weight:500}
+pre{margin:0; white-space:pre-wrap; word-break:break-word; background:var(--bg); border:1px solid var(--line);
+  border-radius:10px; padding:10px 12px; font-family:ui-monospace,Consolas,"Roboto Mono",monospace; font-size:.86rem; line-height:1.55;
+  max-height:220px; overflow:auto}
+.nurse pre{border-color:var(--go); border-width:2px}
+.sec .row{margin-top:8px}
+.note{background:var(--flag-bg); border-left:4px solid var(--flag); padding:8px 12px; border-radius:0 8px 8px 0; font-size:.9rem}
+.empty{color:var(--muted); font-size:.94rem; margin:0}
+</style>
+</head>
+<body>
+<main>
+  <h1>EMR-Typer หน้าส่ง</h1>
+  <p class="lede">วางบันทึกที่ตรวจทานแล้วจากแอป แล้วพิมพ์ลง EMR ทีละช่อง</p>
+
+  <section class="panel" aria-label="การเชื่อมต่อ">
+    <div class="conn">
+      <span class="dot" id="dot"></span>
+      <span id="connText">ยังไม่ได้เชื่อมต่อบอร์ด</span>
+      <button id="connectBtn" style="margin-left:auto">เชื่อมต่อบอร์ด</button>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="วางบันทึก">
+    <div class="row" style="margin-top:0">
+      <button class="primary" id="pasteBtn">วางบันทึกจากแอป</button>
+      <button id="clearBtn">ล้าง</button>
+    </div>
+    <textarea id="pasteBox" hidden placeholder="กดค้างตรงนี้แล้วเลือก “วาง”"></textarea>
+    <div id="msg" aria-live="polite">ในแอป กด “คัดลอกทั้งหมดไปหน้าส่ง” ก่อน แล้วกลับมากดวางที่นี่</div>
+  </section>
+
+  <section class="panel" aria-label="ช่อง EMR">
+    <div id="sections"><p class="empty">ยังไม่มีบันทึก</p></div>
+    <div class="row">
+      <button class="primary wide" id="nextBtn" disabled>พิมพ์ช่องถัดไป</button>
+    </div>
+  </section>
+
+  <p class="note">ข้อมูลอยู่ในหน้านี้ชั่วคราวเท่านั้น ไม่ถูกบันทึกหรือส่งไปที่อื่น กด “ล้าง” เมื่อเสร็จเคส ใช้กับเคสจำลองเท่านั้น</p>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const RX  = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+const TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const ORDER = ['cc','pi','pe','mx','plan','order'];
+const LABEL = {cc:'CC', pi:'PI', pe:'PE', mx:'Management', plan:'Plan', order:'Order to Nurse'};
+const MARK = /\[\*{0,3}\?{1,3}\*{0,3}\]/;
+
+let data = {}, keys = [], state = {};
+let rxChar = null, btDevice = null, typingKey = null, typingTimer = null;
+
+function msg(t){ $('#msg').textContent = t; }
+
+/* ---------- parse the bundle from the app ---------- */
+function parse(text){
+  const t = (text || '').replace(/\r/g, '');
+  if (!/^EMR-TYPER\/1\b/m.test(t)) return null;
+  const out = {}; let cur = null;
+  t.split('\n').forEach(line => {
+    const m = line.match(/^@@(CC|PI|PE|MX|PLAN|ORDER)\s*$/);
+    if (m) { cur = m[1].toLowerCase(); out[cur] = []; return; }
+    if (cur) out[cur].push(line);
+  });
+  const res = {};
+  ORDER.forEach(k => { if (out[k]) { const v = out[k].join('\n').trim(); if (v) res[k] = v; } });
+  return res;
+}
+function load(text){
+  const d = parse(text);
+  if (!d) { msg('ข้อความที่วางไม่ใช่บันทึกจากแอป ในแอปให้กด “คัดลอกทั้งหมดไปหน้าส่ง” ก่อน'); return false; }
+  if (!Object.keys(d).length) { msg('บันทึกว่างเปล่า'); return false; }
+  data = d; keys = ORDER.filter(k => d[k]); state = {};
+  keys.forEach(k => state[k] = 'idle');
+  render();
+  msg('วางแล้ว ' + keys.length + ' ช่อง ' + (rxChar ? 'ใน EMR คลิกช่องแรกแล้วกดพิมพ์' : 'กดเชื่อมต่อบอร์ดก่อน'));
+  $('#pasteBox').hidden = true; $('#pasteBox').value = '';
+  return true;
+}
+
+/* ---------- render ---------- */
+function render(){
+  const wrap = $('#sections');
+  wrap.textContent = '';
+  if (!keys.length) { wrap.innerHTML = '<p class="empty">ยังไม่มีบันทึก</p>'; refresh(); return; }
+  keys.forEach(k => {
+    const div = document.createElement('div');
+    div.className = 'sec' + (k === 'order' ? ' nurse' : '');
+    div.id = 'sec-' + k;
+    const head = document.createElement('div'); head.className = 'head';
+    const st = document.createElement('span'); st.className = 'state'; st.id = 'st-' + k;
+    const name = document.createElement('strong'); name.textContent = LABEL[k];
+    head.append(name, st);
+    const pre = document.createElement('pre'); pre.textContent = data[k];
+    const row = document.createElement('div'); row.className = 'row';
+    const b = document.createElement('button'); b.textContent = 'พิมพ์ ' + LABEL[k]; b.dataset.key = k;
+    row.append(b);
+    div.append(head, pre, row);
+    wrap.appendChild(div);
+  });
+  refresh();
+}
+$('#sections').addEventListener('click', e => { const k = e.target.dataset.key; if (k) sendSection(k); });
+
+function nextKey(){ return keys.find(k => state[k] !== 'done'); }
+function refresh(){
+  const ready = !!rxChar && !typingKey;
+  keys.forEach(k => {
+    const flagged = MARK.test(data[k]);
+    const b = document.querySelector(`button[data-key="${k}"]`);
+    if (b) b.disabled = !(ready && !flagged);
+    const sec = document.getElementById('sec-' + k);
+    sec.classList.remove('next'); sec.classList.toggle('warn', flagged);
+    const st = document.getElementById('st-' + k);
+    st.className = 'state ' + (flagged ? 'warn' : state[k]);
+    st.textContent = flagged ? 'มี [***???***] แก้ในแอปก่อน' : state[k] === 'done' ? 'พิมพ์แล้ว' : state[k] === 'typing' ? 'กำลังพิมพ์...' : '';
+  });
+  const nk = nextKey();
+  if (nk) document.getElementById('sec-' + nk).classList.add('next');
+  const nb = $('#nextBtn');
+  const flagged = nk && MARK.test(data[nk]);
+  nb.textContent = typingKey ? 'บอร์ดกำลังพิมพ์...' :
+                   !keys.length ? 'พิมพ์ช่องถัดไป' :
+                   flagged ? 'แก้ [***???***] ในช่อง ' + LABEL[nk] + ' ที่แอปก่อน' :
+                   nk ? 'พิมพ์ ' + LABEL[nk] + ' ลง EMR' : 'พิมพ์ครบทุกช่องแล้ว';
+  nb.disabled = !(ready && nk && !flagged);
+}
+$('#nextBtn').onclick = () => { const k = nextKey(); if (k) sendSection(k); };
+
+/* ---------- paste ---------- */
+$('#pasteBtn').onclick = async () => {
+  try {
+    const t = await navigator.clipboard.readText();
+    if (!load(t)) { $('#pasteBox').hidden = false; }
+  } catch (_) {
+    $('#pasteBox').hidden = false; $('#pasteBox').focus();
+    msg('กดค้างในกรอบด้านบน แล้วเลือก “วาง”');
+  }
+};
+$('#pasteBox').addEventListener('input', e => { if (e.target.value.trim()) load(e.target.value); });
+$('#clearBtn').onclick = () => {
+  if (typingKey) return;
+  data = {}; keys = []; state = {}; render();
+  $('#pasteBox').value = ''; $('#pasteBox').hidden = true;
+  msg('ล้างแล้ว พร้อมสำหรับเคสใหม่');
+};
+
+/* ---------- Bluetooth ---------- */
+function setConn(st, name){
+  $('#dot').className = 'dot' + (st === 'on' ? ' on' : st === 'wait' ? ' wait' : '');
+  $('#connText').textContent = st === 'on' ? 'เชื่อมต่อแล้ว: ' + (name || 'EMR-Typer') : st === 'wait' ? 'กำลังเชื่อมต่อ...' : 'ยังไม่ได้เชื่อมต่อบอร์ด';
+  $('#connectBtn').textContent = st === 'on' ? 'ตัดการเชื่อมต่อ' : 'เชื่อมต่อบอร์ด';
+  refresh();
+}
+function finishTyping(note){
+  clearTimeout(typingTimer);
+  if (typingKey) state[typingKey] = 'done';
+  typingKey = null;
+  const nk = nextKey();
+  msg(note + (nk ? ' ต่อไป: คลิกช่อง ' + LABEL[nk] + ' ใน EMR แล้วกดพิมพ์' : ' ครบทุกช่องแล้ว อย่าลืมกดบันทึกใน EMR และกดล้างที่หน้านี้'));
+  refresh();
+}
+$('#connectBtn').onclick = async () => {
+  if (btDevice && btDevice.gatt.connected) { btDevice.gatt.disconnect(); return; }
+  if (!navigator.bluetooth) { msg('เบราว์เซอร์นี้เชื่อมต่อบอร์ดไม่ได้ ให้เปิดหน้านี้ใน Chrome บน Android'); return; }
+  try {
+    setConn('wait');
+    const device = await navigator.bluetooth.requestDevice({filters:[{namePrefix:'EMR-Typer'}], optionalServices:[NUS]});
+    device.addEventListener('gattserverdisconnected', () => {
+      rxChar = null;
+      if (typingKey) { state[typingKey] = 'idle'; typingKey = null; clearTimeout(typingTimer); }
+      setConn('off'); msg('บอร์ดตัดการเชื่อมต่อแล้ว กดเชื่อมต่อใหม่');
+    });
+    const svc = await (await device.gatt.connect()).getPrimaryService(NUS);
+    rxChar = await svc.getCharacteristic(RX);
+    try {
+      const tx = await svc.getCharacteristic(TX);
+      await tx.startNotifications();
+      tx.addEventListener('characteristicvaluechanged', e => {
+        const t = new TextDecoder().decode(e.target.value);
+        if (/^Typed/.test(t) && typingKey) finishTyping(/skipped/.test(t) ? 'พิมพ์เสร็จ (มีบางตัวอักษรถูกข้าม ตรวจใน EMR)' : 'พิมพ์เสร็จแล้ว');
+      });
+    } catch (_) {}
+    btDevice = device;
+    setConn('on', device.name);
+    msg(keys.length ? 'ใน EMR คลิกช่อง ' + LABEL[nextKey() || keys[0]] + ' แล้วกดพิมพ์' : 'เชื่อมต่อแล้ว วางบันทึกจากแอปได้เลย');
+  } catch (e) {
+    setConn('off');
+    if (e && e.name === 'NotFoundError') msg('ไม่ได้เลือกบอร์ด หรือไม่พบบอร์ด ตรวจว่าบอร์ดเสียบไฟอยู่ และเปิด Bluetooth กับ Location ของมือถือแล้ว');
+    else msg('เชื่อมต่อไม่สำเร็จ: ' + ((e && e.message) || 'ไม่ทราบสาเหตุ'));
+  }
+};
+async function sendSection(k){
+  const text = data[k];
+  if (!rxChar || !text || typingKey || MARK.test(text)) return;
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length > 8000) { msg('ช่องนี้ยาวเกินไปสำหรับบอร์ด แบ่งในแอปเป็นสองส่วน'); return; }
+  typingKey = k; state[k] = 'typing'; refresh();
+  try {
+    for (let i = 0; i < bytes.length; i += 100) {
+      const chunk = bytes.slice(i, i + 100);
+      if (rxChar.writeValueWithResponse) await rxChar.writeValueWithResponse(chunk); else await rxChar.writeValue(chunk);
+    }
+    const thaiRuns = (text.match(/[\u0E00-\u0E7F]+/g) || []).length;
+    const secs = Math.ceil(text.length * 0.021 + thaiRuns * 0.35 + 0.5);
+    msg('บอร์ดกำลังพิมพ์ ' + LABEL[k] + ' ประมาณ ' + secs + ' วินาที อย่าคลิกที่อื่นในคอมระหว่างนี้');
+    typingTimer = setTimeout(() => finishTyping('น่าจะพิมพ์เสร็จแล้ว (ไม่ได้รับยืนยันจากบอร์ด ตรวจใน EMR)'), secs * 1500 + 3000);
+  } catch (e) {
+    state[k] = 'idle'; typingKey = null;
+    msg('ส่งไม่สำเร็จ: ' + ((e && e.message) || 'ลองเชื่อมต่อใหม่'));
+    refresh();
+  }
+}
+refresh();
+</script>
+</body>
+</html>
