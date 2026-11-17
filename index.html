@@ -67,12 +67,13 @@ pre{margin:0; white-space:pre-wrap; word-break:break-word; background:var(--bg);
 .sec .row{margin-top:8px}
 .note{background:var(--flag-bg); border-left:4px solid var(--flag); padding:8px 12px; border-radius:0 8px 8px 0; font-size:.9rem}
 .empty{color:var(--muted); font-size:.94rem; margin:0}
+.sec .row button{min-height:38px; padding:6px 12px}
 </style>
 </head>
 <body>
 <main>
-  <h1>EMR-Typer หน้าส่ง</h1>
-  <p class="lede">วางบันทึกที่ตรวจทานแล้วจากแอป แล้วพิมพ์ลง EMR ทีละช่อง</p>
+  <h1>EMR-Typer หน้าส่ง <small style="font-weight:400;color:var(--muted);font-size:.8rem">v2.0</small></h1>
+  <p class="lede">วางบันทึกที่ตรวจทานแล้วจากแอป แล้วพิมพ์ลง EMR ในครั้งเดียว</p>
 
   <section class="panel" aria-label="การเชื่อมต่อ">
     <div class="conn">
@@ -88,17 +89,16 @@ pre{margin:0; white-space:pre-wrap; word-break:break-word; background:var(--bg);
       <button id="clearBtn">ล้าง</button>
     </div>
     <textarea id="pasteBox" hidden placeholder="กดค้างตรงนี้แล้วเลือก “วาง”"></textarea>
-    <div id="msg" aria-live="polite">ในแอป กด “คัดลอกทั้งหมดไปหน้าส่ง” ก่อน แล้วกลับมากดวางที่นี่</div>
+    <div id="msg" aria-live="polite">ในแอป กด “คัดลอกไปหน้าส่ง” ก่อน แล้วกลับมากดวางที่นี่</div>
   </section>
 
-  <section class="panel" aria-label="ช่อง EMR">
+  <section class="panel" aria-label="บันทึกที่จะพิมพ์">
+    <button class="primary wide" id="allBtn" disabled>พิมพ์ทั้งหมดในครั้งเดียว</button>
+    <p class="lede" style="margin:8px 0 4px;font-size:.88rem">ใน EMR คลิกช่องใดช่องหนึ่งก่อนกด แต่ละส่วนจะมีเส้นคั่นพร้อมชื่อ เพื่อให้ตัดไปวางในช่องอื่นได้ง่าย</p>
     <div id="sections"><p class="empty">ยังไม่มีบันทึก</p></div>
-    <div class="row">
-      <button class="primary wide" id="nextBtn" disabled>พิมพ์ช่องถัดไป</button>
-    </div>
   </section>
 
-  <p class="note">ข้อมูลอยู่ในหน้านี้ชั่วคราวเท่านั้น ไม่ถูกบันทึกหรือส่งไปที่อื่น กด “ล้าง” เมื่อเสร็จเคส ใช้กับเคสจำลองเท่านั้น</p>
+  <p class="note">ข้อมูลอยู่ในหน้านี้ชั่วคราวเท่านั้น ไม่ถูกบันทึกหรือส่งไปที่อื่น กด “ล้าง” เมื่อเสร็จ ใช้กับเคสจำลองเท่านั้น</p>
 </main>
 
 <script>
@@ -106,106 +106,85 @@ const $ = s => document.querySelector(s);
 const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const RX  = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 const TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
-const ORDER = ['cc','pi','pe','mx','plan','order'];
-const LABEL = {cc:'CC', pi:'PI', pe:'PE', mx:'Management', plan:'Plan', order:'Order to Nurse'};
+const DEFAULT_LABEL = {CC:'CC', PI:'PI', PE:'PE', MX:'Management', PLAN:'Plan', ORDER:'Order to Nurse',
+                       HXPE:'History & PE', AP:'Assessment & Plan', PROG:'Progress note & Plan'};
 const MARK = /\[\*{0,3}\?{1,3}\*{0,3}\]/;
 
-let data = {}, keys = [], state = {};
-let rxChar = null, btDevice = null, typingKey = null, typingTimer = null;
+let parts = [];            // [{key, label, text, state}]
+let rxChar = null, btDevice = null, busy = false, waiter = null;
 
 function msg(t){ $('#msg').textContent = t; }
 
-/* ---------- parse the bundle from the app ---------- */
+/* ---------- parse ---------- */
 function parse(text){
   const t = (text || '').replace(/\r/g, '');
-  if (!/^EMR-TYPER\/1\b/m.test(t)) return null;
-  const out = {}; let cur = null;
+  if (!/^EMR-TYPER\/[12]\b/m.test(t)) return null;
+  const out = []; let cur = null;
   t.split('\n').forEach(line => {
-    const m = line.match(/^@@(CC|PI|PE|MX|PLAN|ORDER)\s*$/);
-    if (m) { cur = m[1].toLowerCase(); out[cur] = []; return; }
-    if (cur) out[cur].push(line);
+    const m = line.match(/^@@([A-Z0-9_]+)(?:\|(.*))?\s*$/);
+    if (m) { cur = {key: m[1], label: (m[2] || DEFAULT_LABEL[m[1]] || m[1]).trim(), lines: []}; out.push(cur); return; }
+    if (cur) cur.lines.push(line);
   });
-  const res = {};
-  ORDER.forEach(k => { if (out[k]) { const v = out[k].join('\n').trim(); if (v) res[k] = v; } });
-  return res;
+  return out.map(p => ({key: p.key, label: p.label, text: p.lines.join('\n').trim(), state: 'idle'})).filter(p => p.text);
 }
 function load(text){
   const d = parse(text);
-  if (!d) { msg('ข้อความที่วางไม่ใช่บันทึกจากแอป ในแอปให้กด “คัดลอกทั้งหมดไปหน้าส่ง” ก่อน'); return false; }
-  if (!Object.keys(d).length) { msg('บันทึกว่างเปล่า'); return false; }
-  data = d; keys = ORDER.filter(k => d[k]); state = {};
-  keys.forEach(k => state[k] = 'idle');
-  render();
-  msg('วางแล้ว ' + keys.length + ' ช่อง ' + (rxChar ? 'ใน EMR คลิกช่องแรกแล้วกดพิมพ์' : 'กดเชื่อมต่อบอร์ดก่อน'));
+  if (!d) { msg('ข้อความที่วางไม่ใช่บันทึกจากแอป ในแอปให้กด “คัดลอกไปหน้าส่ง” ก่อน'); return false; }
+  if (!d.length) { msg('บันทึกว่างเปล่า'); return false; }
+  parts = d; render();
+  msg('วางแล้ว ' + parts.length + ' ส่วน ' + (rxChar ? 'ใน EMR คลิกช่องที่จะพิมพ์ แล้วกดพิมพ์ทั้งหมด' : 'กดเชื่อมต่อบอร์ดก่อน'));
   $('#pasteBox').hidden = true; $('#pasteBox').value = '';
   return true;
 }
 
 /* ---------- render ---------- */
 function render(){
-  const wrap = $('#sections');
-  wrap.textContent = '';
-  if (!keys.length) { wrap.innerHTML = '<p class="empty">ยังไม่มีบันทึก</p>'; refresh(); return; }
-  keys.forEach(k => {
+  const wrap = $('#sections'); wrap.textContent = '';
+  if (!parts.length) { wrap.innerHTML = '<p class="empty">ยังไม่มีบันทึก</p>'; refresh(); return; }
+  parts.forEach((p, i) => {
     const div = document.createElement('div');
-    div.className = 'sec' + (k === 'order' ? ' nurse' : '');
-    div.id = 'sec-' + k;
+    div.className = 'sec' + (p.key === 'ORDER' ? ' nurse' : ''); div.id = 'sec-' + i;
     const head = document.createElement('div'); head.className = 'head';
-    const st = document.createElement('span'); st.className = 'state'; st.id = 'st-' + k;
-    const name = document.createElement('strong'); name.textContent = LABEL[k];
+    const name = document.createElement('strong'); name.textContent = p.label;
+    const st = document.createElement('span'); st.className = 'state'; st.id = 'st-' + i;
     head.append(name, st);
-    const pre = document.createElement('pre'); pre.textContent = data[k];
+    const pre = document.createElement('pre'); pre.textContent = p.text;
     const row = document.createElement('div'); row.className = 'row';
-    const b = document.createElement('button'); b.textContent = 'พิมพ์ ' + LABEL[k]; b.dataset.key = k;
+    const b = document.createElement('button'); b.textContent = 'พิมพ์เฉพาะส่วนนี้'; b.dataset.idx = i;
     row.append(b);
-    div.append(head, pre, row);
-    wrap.appendChild(div);
+    div.append(head, pre, row); wrap.appendChild(div);
   });
   refresh();
 }
-$('#sections').addEventListener('click', e => { const k = e.target.dataset.key; if (k) sendSection(k); });
-
-function nextKey(){ return keys.find(k => state[k] !== 'done'); }
+$('#sections').addEventListener('click', e => { const i = e.target.dataset.idx; if (i !== undefined) sendParts([+i]); });
 function refresh(){
-  const ready = !!rxChar && !typingKey;
-  keys.forEach(k => {
-    const flagged = MARK.test(data[k]);
-    const b = document.querySelector(`button[data-key="${k}"]`);
-    if (b) b.disabled = !(ready && !flagged);
-    const sec = document.getElementById('sec-' + k);
-    sec.classList.remove('next'); sec.classList.toggle('warn', flagged);
-    const st = document.getElementById('st-' + k);
-    st.className = 'state ' + (flagged ? 'warn' : state[k]);
-    st.textContent = flagged ? 'มี [***???***] แก้ในแอปก่อน' : state[k] === 'done' ? 'พิมพ์แล้ว' : state[k] === 'typing' ? 'กำลังพิมพ์...' : '';
+  const flagged = parts.some(p => MARK.test(p.text));
+  parts.forEach((p, i) => {
+    const f = MARK.test(p.text);
+    const sec = document.getElementById('sec-' + i); if (!sec) return;
+    sec.classList.toggle('warn', f);
+    sec.querySelector('button').disabled = !rxChar || busy || f;
+    const st = document.getElementById('st-' + i);
+    st.className = 'state ' + (f ? 'warn' : p.state);
+    st.textContent = f ? 'มี [***???***] แก้ในแอปก่อน' : p.state === 'done' ? 'พิมพ์แล้ว' : p.state === 'typing' ? 'กำลังพิมพ์...' : '';
   });
-  const nk = nextKey();
-  if (nk) document.getElementById('sec-' + nk).classList.add('next');
-  const nb = $('#nextBtn');
-  const flagged = nk && MARK.test(data[nk]);
-  nb.textContent = typingKey ? 'บอร์ดกำลังพิมพ์...' :
-                   !keys.length ? 'พิมพ์ช่องถัดไป' :
-                   flagged ? 'แก้ [***???***] ในช่อง ' + LABEL[nk] + ' ที่แอปก่อน' :
-                   nk ? 'พิมพ์ ' + LABEL[nk] + ' ลง EMR' : 'พิมพ์ครบทุกช่องแล้ว';
-  nb.disabled = !(ready && nk && !flagged);
+  const all = $('#allBtn');
+  all.disabled = !rxChar || busy || !parts.length || flagged;
+  all.textContent = busy ? 'บอร์ดกำลังพิมพ์...' : flagged ? 'มี [***???***] แก้ในแอปก่อน' :
+                    parts.length && parts.every(p => p.state === 'done') ? 'พิมพ์ครบแล้ว (กดอีกครั้งเพื่อพิมพ์ซ้ำ)' : 'พิมพ์ทั้งหมดในครั้งเดียว';
 }
-$('#nextBtn').onclick = () => { const k = nextKey(); if (k) sendSection(k); };
+$('#allBtn').onclick = () => sendParts(parts.map((_, i) => i));
 
 /* ---------- paste ---------- */
 $('#pasteBtn').onclick = async () => {
-  try {
-    const t = await navigator.clipboard.readText();
-    if (!load(t)) { $('#pasteBox').hidden = false; }
-  } catch (_) {
-    $('#pasteBox').hidden = false; $('#pasteBox').focus();
-    msg('กดค้างในกรอบด้านบน แล้วเลือก “วาง”');
-  }
+  try { const t = await navigator.clipboard.readText(); if (!load(t)) $('#pasteBox').hidden = false; }
+  catch (_) { $('#pasteBox').hidden = false; $('#pasteBox').focus(); msg('กดค้างในกรอบด้านบน แล้วเลือก “วาง”'); }
 };
 $('#pasteBox').addEventListener('input', e => { if (e.target.value.trim()) load(e.target.value); });
 $('#clearBtn').onclick = () => {
-  if (typingKey) return;
-  data = {}; keys = []; state = {}; render();
-  $('#pasteBox').value = ''; $('#pasteBox').hidden = true;
-  msg('ล้างแล้ว พร้อมสำหรับเคสใหม่');
+  if (busy) return;
+  parts = []; render(); $('#pasteBox').value = ''; $('#pasteBox').hidden = true;
+  msg('ล้างแล้ว พร้อมสำหรับเคสถัดไป');
 };
 
 /* ---------- Bluetooth ---------- */
@@ -215,64 +194,121 @@ function setConn(st, name){
   $('#connectBtn').textContent = st === 'on' ? 'ตัดการเชื่อมต่อ' : 'เชื่อมต่อบอร์ด';
   refresh();
 }
-function finishTyping(note){
-  clearTimeout(typingTimer);
-  if (typingKey) state[typingKey] = 'done';
-  typingKey = null;
-  const nk = nextKey();
-  msg(note + (nk ? ' ต่อไป: คลิกช่อง ' + LABEL[nk] + ' ใน EMR แล้วกดพิมพ์' : ' ครบทุกช่องแล้ว อย่าลืมกดบันทึกใน EMR และกดล้างที่หน้านี้'));
-  refresh();
+function withTimeout(promise, ms, label){
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('หมดเวลา: ' + label)), ms))]);
+}
+async function openGatt(device){
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      msg('กำลังเชื่อมต่อกับบอร์ด (ครั้งที่ ' + attempt + ')...');
+      const server = await withTimeout(device.gatt.connect(), 10000, 'เชื่อมต่อ');
+      msg('เชื่อมต่อแล้ว กำลังหาช่องรับข้อความ...');
+      const svc = await withTimeout(server.getPrimaryService(NUS), 8000, 'หาบริการ');
+      const rx = await withTimeout(svc.getCharacteristic(RX), 8000, 'หาช่องรับข้อความ');
+      return {svc, rx};
+    } catch (e) {
+      lastErr = e;
+      try { device.gatt.disconnect(); } catch (_) {}
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  throw lastErr;
+}
+function listenForTyped(svc){
+  withTimeout(svc.getCharacteristic(TX), 5000, 'tx').then(tx =>
+    withTimeout(tx.startNotifications(), 5000, 'notify').then(() => {
+      tx.addEventListener('characteristicvaluechanged', e => {
+        const t = new TextDecoder().decode(e.target.value);
+        if (/^Typed/.test(t) && waiter) waiter(/skipped/.test(t) ? 'skipped' : 'ok');
+      });
+    })
+  ).catch(() => {});
 }
 $('#connectBtn').onclick = async () => {
   if (btDevice && btDevice.gatt.connected) { btDevice.gatt.disconnect(); return; }
   if (!navigator.bluetooth) { msg('เบราว์เซอร์นี้เชื่อมต่อบอร์ดไม่ได้ ให้เปิดหน้านี้ใน Chrome บน Android'); return; }
+  let device;
   try {
     setConn('wait');
-    const device = await navigator.bluetooth.requestDevice({filters:[{namePrefix:'EMR-Typer'}], optionalServices:[NUS]});
-    device.addEventListener('gattserverdisconnected', () => {
-      rxChar = null;
-      if (typingKey) { state[typingKey] = 'idle'; typingKey = null; clearTimeout(typingTimer); }
-      setConn('off'); msg('บอร์ดตัดการเชื่อมต่อแล้ว กดเชื่อมต่อใหม่');
-    });
-    const svc = await (await device.gatt.connect()).getPrimaryService(NUS);
-    rxChar = await svc.getCharacteristic(RX);
-    try {
-      const tx = await svc.getCharacteristic(TX);
-      await tx.startNotifications();
-      tx.addEventListener('characteristicvaluechanged', e => {
-        const t = new TextDecoder().decode(e.target.value);
-        if (/^Typed/.test(t) && typingKey) finishTyping(/skipped/.test(t) ? 'พิมพ์เสร็จ (มีบางตัวอักษรถูกข้าม ตรวจใน EMR)' : 'พิมพ์เสร็จแล้ว');
-      });
-    } catch (_) {}
-    btDevice = device;
-    setConn('on', device.name);
-    msg(keys.length ? 'ใน EMR คลิกช่อง ' + LABEL[nextKey() || keys[0]] + ' แล้วกดพิมพ์' : 'เชื่อมต่อแล้ว วางบันทึกจากแอปได้เลย');
+    device = await navigator.bluetooth.requestDevice({filters:[{namePrefix:'EMR-Typer'}], optionalServices:[NUS]});
   } catch (e) {
     setConn('off');
-    if (e && e.name === 'NotFoundError') msg('ไม่ได้เลือกบอร์ด หรือไม่พบบอร์ด ตรวจว่าบอร์ดเสียบไฟอยู่ และเปิด Bluetooth กับ Location ของมือถือแล้ว');
-    else msg('เชื่อมต่อไม่สำเร็จ: ' + ((e && e.message) || 'ไม่ทราบสาเหตุ'));
+    msg(e && e.name === 'NotFoundError'
+      ? 'ไม่ได้เลือกบอร์ด หรือไม่พบบอร์ด ตรวจว่าบอร์ดเสียบไฟอยู่ และเปิด Bluetooth กับ Location ของมือถือแล้ว'
+      : 'เปิดหน้าต่างเลือกบอร์ดไม่ได้: ' + ((e && e.message) || 'ไม่ทราบสาเหตุ'));
+    return;
+  }
+  try {
+    device.addEventListener('gattserverdisconnected', () => {
+      rxChar = null; if (waiter) waiter('disconnected');
+      setConn('off'); msg('บอร์ดตัดการเชื่อมต่อแล้ว กดเชื่อมต่อใหม่');
+    });
+    const {svc, rx} = await openGatt(device);
+    rxChar = rx; btDevice = device;
+    setConn('on', device.name);
+    listenForTyped(svc);
+    msg(parts.length ? 'ใน EMR คลิกช่องที่จะพิมพ์ แล้วกดพิมพ์ทั้งหมด' : 'เชื่อมต่อแล้ว วางบันทึกจากแอปได้เลย');
+  } catch (e) {
+    setConn('off');
+    msg('เชื่อมต่อไม่สำเร็จ: ' + ((e && e.message) || 'ไม่ทราบสาเหตุ') + ' — ปิดแอป Bluefruit ถอดเสียบบอร์ดใหม่ แล้วลองอีกครั้ง');
   }
 };
-async function sendSection(k){
-  const text = data[k];
-  if (!rxChar || !text || typingKey || MARK.test(text)) return;
+
+/* ---------- typing ---------- */
+function estimateSecs(text){
+  const thaiRuns = (text.match(/[\u0E00-\u0E7F]+/g) || []).length;
+  return Math.ceil(text.length * 0.021 + thaiRuns * 0.35 + 0.5);
+}
+async function writeText(text){
   const bytes = new TextEncoder().encode(text);
-  if (bytes.length > 8000) { msg('ช่องนี้ยาวเกินไปสำหรับบอร์ด แบ่งในแอปเป็นสองส่วน'); return; }
-  typingKey = k; state[k] = 'typing'; refresh();
-  try {
-    for (let i = 0; i < bytes.length; i += 100) {
-      const chunk = bytes.slice(i, i + 100);
-      if (rxChar.writeValueWithResponse) await rxChar.writeValueWithResponse(chunk); else await rxChar.writeValue(chunk);
-    }
-    const thaiRuns = (text.match(/[\u0E00-\u0E7F]+/g) || []).length;
-    const secs = Math.ceil(text.length * 0.021 + thaiRuns * 0.35 + 0.5);
-    msg('บอร์ดกำลังพิมพ์ ' + LABEL[k] + ' ประมาณ ' + secs + ' วินาที อย่าคลิกที่อื่นในคอมระหว่างนี้');
-    typingTimer = setTimeout(() => finishTyping('น่าจะพิมพ์เสร็จแล้ว (ไม่ได้รับยืนยันจากบอร์ด ตรวจใน EMR)'), secs * 1500 + 3000);
-  } catch (e) {
-    state[k] = 'idle'; typingKey = null;
-    msg('ส่งไม่สำเร็จ: ' + ((e && e.message) || 'ลองเชื่อมต่อใหม่'));
-    refresh();
+  for (let i = 0; i < bytes.length; i += 100) {
+    const chunk = bytes.slice(i, i + 100);
+    if (rxChar.writeValueWithResponse) await rxChar.writeValueWithResponse(chunk); else await rxChar.writeValue(chunk);
   }
+}
+function typeAndWait(text){
+  return new Promise(async (resolve, reject) => {
+    const secs = estimateSecs(text);
+    const timer = setTimeout(() => { waiter = null; resolve('timeout'); }, secs * 1500 + 3000);
+    waiter = r => { clearTimeout(timer); waiter = null; r === 'disconnected' ? reject(new Error('บอร์ดตัดการเชื่อมต่อ')) : resolve(r); };
+    try { await writeText(text); } catch (e) { clearTimeout(timer); waiter = null; reject(e); }
+  });
+}
+async function sendParts(idxs){
+  if (!rxChar || busy) return;
+  const list = idxs.filter(i => parts[i] && !MARK.test(parts[i].text));
+  if (!list.length) return;
+  const multi = list.length > 1;
+  const total = list.reduce((a, i) => a + estimateSecs(parts[i].text), 0);
+  busy = true; refresh();
+  msg('บอร์ดกำลังพิมพ์ ประมาณ ' + total + ' วินาที อย่าคลิกที่อื่นในคอมระหว่างนี้');
+  let skipped = false, unconfirmed = false;
+  try {
+    for (let n = 0; n < list.length; n++) {
+      const p = parts[list[n]];
+      let text = p.text;
+      if (multi) text = (n > 0 ? '\n\n' : '') + '===== ' + p.label + ' =====\n' + p.text;
+      if (text.length > 2600) {               // stay well under the board's 8 KB queue
+        const lines = text.split('\n'); let chunk = '';
+        p.state = 'typing'; refresh();
+        for (const line of lines) {
+          if ((chunk + line).length > 2500 && chunk) { const r = await typeAndWait(chunk); skipped ||= r === 'skipped'; unconfirmed ||= r === 'timeout'; chunk = ''; }
+          chunk += (chunk ? '\n' : '') + line;
+        }
+        if (chunk) { const r = await typeAndWait(chunk); skipped ||= r === 'skipped'; unconfirmed ||= r === 'timeout'; }
+      } else {
+        p.state = 'typing'; refresh();
+        const r = await typeAndWait(text); skipped ||= r === 'skipped'; unconfirmed ||= r === 'timeout';
+      }
+      p.state = 'done'; refresh();
+    }
+    msg('พิมพ์เสร็จแล้ว' + (skipped ? ' (มีบางตัวอักษรถูกข้าม ตรวจใน EMR)' : '') + (unconfirmed ? ' (บางส่วนไม่ได้รับยืนยันจากบอร์ด ตรวจใน EMR)' : '') +
+        (multi ? ' ตัดแต่ละส่วนไปวางในช่องของ EMR แล้วลบเส้นคั่นออก' : '') + ' อย่าลืมกดบันทึกใน EMR');
+  } catch (e) {
+    parts.forEach(p => { if (p.state === 'typing') p.state = 'idle'; });
+    msg('ส่งไม่สำเร็จ: ' + ((e && e.message) || 'ลองเชื่อมต่อใหม่'));
+  } finally { busy = false; refresh(); }
 }
 refresh();
 </script>
