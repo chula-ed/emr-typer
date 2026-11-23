@@ -68,12 +68,19 @@ pre{margin:0; white-space:pre-wrap; word-break:break-word; background:var(--bg);
 .note{background:var(--flag-bg); border-left:4px solid var(--flag); padding:8px 12px; border-radius:0 8px 8px 0; font-size:.9rem}
 .empty{color:var(--muted); font-size:.94rem; margin:0}
 .sec .row button{min-height:38px; padding:6px 12px}
+.modes{display:flex; border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:4px}
+.modes button{flex:1; border:none; border-radius:0; background:var(--surface); min-height:48px}
+.modes button[aria-pressed="true"]{background:var(--go); color:var(--go-ink)}
+#freeText{width:100%; max-width:100%; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--ink);
+  padding:10px 12px; font:inherit; resize:vertical; min-height:8.5em; margin-top:6px}
+#freeText.warn{border:2px solid var(--stop)}
+.small{color:var(--muted); font-size:.86rem}
 </style>
 </head>
 <body>
 <main>
-  <h1>EMR-Typer หน้าส่ง <small style="font-weight:400;color:var(--muted);font-size:.8rem">v2.0</small></h1>
-  <p class="lede">วางบันทึกที่ตรวจทานแล้วจากแอป แล้วพิมพ์ลง EMR ในครั้งเดียว</p>
+  <h1>EMR-Typer หน้าส่ง <small style="font-weight:400;color:var(--muted);font-size:.8rem">v2.2</small></h1>
+  <p class="lede">พิมพ์เอง หรือวางบันทึกจากแอป แล้วให้บอร์ดพิมพ์ลง EMR</p>
 
   <section class="panel" aria-label="การเชื่อมต่อ">
     <div class="conn">
@@ -83,19 +90,26 @@ pre{margin:0; white-space:pre-wrap; word-break:break-word; background:var(--bg);
     </div>
   </section>
 
-  <section class="panel" aria-label="วางบันทึก">
+  <section class="panel" aria-label="พิมพ์ลง EMR">
     <div class="row" style="margin-top:0">
-      <button class="primary" id="pasteBtn">วางบันทึกจากแอป</button>
+      <button id="pasteBtn">วางบันทึกจากแอป</button>
       <button id="clearBtn">ล้าง</button>
     </div>
     <textarea id="pasteBox" hidden placeholder="กดค้างตรงนี้แล้วเลือก “วาง”"></textarea>
-    <div id="msg" aria-live="polite">ในแอป กด “คัดลอกไปหน้าส่ง” ก่อน แล้วกลับมากดวางที่นี่</div>
+    <label for="freeText" class="small" style="display:block;margin-top:14px">หรือพิมพ์ / กดไมค์บนคีย์บอร์ดแล้วพูดตรงนี้ (ไม่ผ่าน AI)</label>
+    <textarea id="freeText" rows="5" spellcheck="false" placeholder="เช่น Laceration wound 2 cm at Lt index finger, clean wound"></textarea>
+    <div class="row">
+      <button class="primary" id="freeSend" disabled style="flex:1">พิมพ์ลง EMR</button>
+      <button id="freeClear">ล้างข้อความ</button>
+    </div>
+    <div class="small" id="freeInfo"></div>
+    <div id="msg" aria-live="polite">คลิกช่องใน EMR ก่อนกดพิมพ์ทุกครั้ง</div>
   </section>
 
-  <section class="panel" aria-label="บันทึกที่จะพิมพ์">
-    <button class="primary wide" id="allBtn" disabled>พิมพ์ทั้งหมดในครั้งเดียว</button>
+  <section class="panel" id="appSections" hidden aria-label="บันทึกจากแอป">
+    <button class="primary wide" id="allBtn" disabled>พิมพ์บันทึกจากแอปทั้งหมด</button>
     <p class="lede" style="margin:8px 0 4px;font-size:.88rem">ใน EMR คลิกช่องใดช่องหนึ่งก่อนกด แต่ละส่วนจะมีเส้นคั่นพร้อมชื่อ เพื่อให้ตัดไปวางในช่องอื่นได้ง่าย</p>
-    <div id="sections"><p class="empty">ยังไม่มีบันทึก</p></div>
+    <div id="sections"></div>
   </section>
 
   <p class="note">ข้อมูลอยู่ในหน้านี้ชั่วคราวเท่านั้น ไม่ถูกบันทึกหรือส่งไปที่อื่น กด “ล้าง” เมื่อเสร็จ ใช้กับเคสจำลองเท่านั้น</p>
@@ -129,7 +143,11 @@ function parse(text){
 }
 function load(text){
   const d = parse(text);
-  if (!d) { msg('ข้อความที่วางไม่ใช่บันทึกจากแอป ในแอปให้กด “คัดลอกไปหน้าส่ง” ก่อน'); return false; }
+  if (!d) {
+    const t = (text || '').replace(/\r/g, '').trim();
+    if (t) { $('#freeText').value = t; freeRefresh(); msg('ข้อความที่วางไม่ใช่บันทึกจากแอป ใส่ไว้ในช่องพิมพ์เองให้แล้ว ตรวจก่อนกดพิมพ์'); $('#pasteBox').hidden = true; $('#pasteBox').value = ''; return true; }
+    msg('คลิปบอร์ดว่าง ในแอปให้กด “คัดลอกไปหน้าส่ง” ก่อน'); return false;
+  }
   if (!d.length) { msg('บันทึกว่างเปล่า'); return false; }
   parts = d; render();
   msg('วางแล้ว ' + parts.length + ' ส่วน ' + (rxChar ? 'ใน EMR คลิกช่องที่จะพิมพ์ แล้วกดพิมพ์ทั้งหมด' : 'กดเชื่อมต่อบอร์ดก่อน'));
@@ -140,7 +158,8 @@ function load(text){
 /* ---------- render ---------- */
 function render(){
   const wrap = $('#sections'); wrap.textContent = '';
-  if (!parts.length) { wrap.innerHTML = '<p class="empty">ยังไม่มีบันทึก</p>'; refresh(); return; }
+  $('#appSections').hidden = !parts.length;
+  if (!parts.length) { refresh(); return; }
   parts.forEach((p, i) => {
     const div = document.createElement('div');
     div.className = 'sec' + (p.key === 'ORDER' ? ' nurse' : ''); div.id = 'sec-' + i;
@@ -158,6 +177,7 @@ function render(){
 }
 $('#sections').addEventListener('click', e => { const i = e.target.dataset.idx; if (i !== undefined) sendParts([+i]); });
 function refresh(){
+  if (typeof freeRefresh === 'function' && $('#freeText')) freeRefresh();
   const flagged = parts.some(p => MARK.test(p.text));
   parts.forEach((p, i) => {
     const f = MARK.test(p.text);
@@ -174,6 +194,30 @@ function refresh(){
                     parts.length && parts.every(p => p.state === 'done') ? 'พิมพ์ครบแล้ว (กดอีกครั้งเพื่อพิมพ์ซ้ำ)' : 'พิมพ์ทั้งหมดในครั้งเดียว';
 }
 $('#allBtn').onclick = () => sendParts(parts.map((_, i) => i));
+
+/* ---------- free text ---------- */
+function freeRefresh(){
+  const t = $('#freeText').value.trim();
+  const flagged = MARK.test(t);
+  $('#freeText').classList.toggle('warn', flagged);
+  $('#freeSend').disabled = !rxChar || busy || !t || flagged;
+  $('#freeSend').textContent = busy ? 'บอร์ดกำลังพิมพ์...' : flagged ? 'มี [***???***] แก้ก่อน' : 'พิมพ์ลง EMR';
+  $('#freeInfo').textContent = t ? t.length + ' ตัวอักษร ใช้เวลาประมาณ ' + estimateSecs(t) + ' วินาที' : '';
+}
+$('#freeText').addEventListener('input', freeRefresh);
+$('#freeClear').onclick = () => { if (busy) return; $('#freeText').value = ''; freeRefresh(); msg('ล้างข้อความแล้ว'); };
+$('#freeSend').onclick = async () => {
+  const t = $('#freeText').value.replace(/\r/g, '').trim();
+  if (!rxChar || busy || !t || MARK.test(t)) return;
+  busy = true; refresh();
+  msg('บอร์ดกำลังพิมพ์ ประมาณ ' + estimateSecs(t) + ' วินาที อย่าคลิกที่อื่นในคอมระหว่างนี้');
+  try {
+    const r = await typeLong(t);
+    msg('พิมพ์เสร็จแล้ว' + (r.skipped ? ' (มีบางตัวอักษรถูกข้าม ตรวจใน EMR)' : '') + (r.unconfirmed ? ' (ไม่ได้รับยืนยันจากบอร์ด ตรวจใน EMR)' : '') + ' ข้อความยังอยู่ในช่อง กด “ล้างข้อความ” เมื่อเสร็จ');
+  } catch (e) {
+    msg('ส่งไม่สำเร็จ: ' + ((e && e.message) || 'ลองเชื่อมต่อใหม่'));
+  } finally { busy = false; refresh(); }
+};
 
 /* ---------- paste ---------- */
 $('#pasteBtn').onclick = async () => {
@@ -275,6 +319,18 @@ function typeAndWait(text){
     try { await writeText(text); } catch (e) { clearTimeout(timer); waiter = null; reject(e); }
   });
 }
+async function typeLong(text){
+  const out = {skipped: false, unconfirmed: false};
+  const note = r => { out.skipped ||= r === 'skipped'; out.unconfirmed ||= r === 'timeout'; };
+  if (text.length <= 2600) { note(await typeAndWait(text)); return out; }
+  const lines = text.split('\n'); let chunk = '';
+  for (const line of lines) {               // stay well under the board's 8 KB queue
+    if ((chunk + line).length > 2500 && chunk) { note(await typeAndWait(chunk)); chunk = ''; }
+    chunk += (chunk ? '\n' : '') + line;
+  }
+  if (chunk) note(await typeAndWait(chunk));
+  return out;
+}
 async function sendParts(idxs){
   if (!rxChar || busy) return;
   const list = idxs.filter(i => parts[i] && !MARK.test(parts[i].text));
@@ -289,18 +345,8 @@ async function sendParts(idxs){
       const p = parts[list[n]];
       let text = p.text;
       if (multi) text = (n > 0 ? '\n\n' : '') + '===== ' + p.label + ' =====\n' + p.text;
-      if (text.length > 2600) {               // stay well under the board's 8 KB queue
-        const lines = text.split('\n'); let chunk = '';
-        p.state = 'typing'; refresh();
-        for (const line of lines) {
-          if ((chunk + line).length > 2500 && chunk) { const r = await typeAndWait(chunk); skipped ||= r === 'skipped'; unconfirmed ||= r === 'timeout'; chunk = ''; }
-          chunk += (chunk ? '\n' : '') + line;
-        }
-        if (chunk) { const r = await typeAndWait(chunk); skipped ||= r === 'skipped'; unconfirmed ||= r === 'timeout'; }
-      } else {
-        p.state = 'typing'; refresh();
-        const r = await typeAndWait(text); skipped ||= r === 'skipped'; unconfirmed ||= r === 'timeout';
-      }
+      p.state = 'typing'; refresh();
+      const r = await typeLong(text); skipped ||= r.skipped; unconfirmed ||= r.unconfirmed;
       p.state = 'done'; refresh();
     }
     msg('พิมพ์เสร็จแล้ว' + (skipped ? ' (มีบางตัวอักษรถูกข้าม ตรวจใน EMR)' : '') + (unconfirmed ? ' (บางส่วนไม่ได้รับยืนยันจากบอร์ด ตรวจใน EMR)' : '') +
