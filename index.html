@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EMR-Typer หน้าส่ง</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#22665A">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{
   --bg:#F3F6F7; --surface:#FFFFFF; --ink:#15202C; --muted:#586676; --line:#D3DBE1;
@@ -79,7 +83,7 @@ pre{margin:0; white-space:pre-wrap; word-break:break-word; background:var(--bg);
 </head>
 <body>
 <main>
-  <h1>EMR-Typer หน้าส่ง <small style="font-weight:400;color:var(--muted);font-size:.8rem">v2.2</small></h1>
+  <h1>EMR-Typer หน้าส่ง <small style="font-weight:400;color:var(--muted);font-size:.8rem">v2.4</small></h1>
   <p class="lede">พิมพ์เอง หรือวางบันทึกจากแอป แล้วให้บอร์ดพิมพ์ลง EMR</p>
 
   <section class="panel" aria-label="การเชื่อมต่อ">
@@ -224,6 +228,19 @@ $('#pasteBtn').onclick = async () => {
   try { const t = await navigator.clipboard.readText(); if (!load(t)) $('#pasteBox').hidden = false; }
   catch (_) { $('#pasteBox').hidden = false; $('#pasteBox').focus(); msg('กดค้างในกรอบด้านบน แล้วเลือก “วาง”'); }
 };
+let lastLoaded = '';
+// When the doctor comes back to this page after "คัดลอกไปหน้าส่ง" in the app,
+// load the note from the clipboard automatically (only notes from the app).
+async function autoLoad(){
+  if (busy || !navigator.clipboard || !navigator.clipboard.readText) return;
+  try {
+    const t = await navigator.clipboard.readText();
+    if (!t || t === lastLoaded || !/^EMR-TYPER\/[12]\b/m.test(t)) return;
+    if (load(t)) { lastLoaded = t; msg('รับบันทึกจากแอปแล้ว ' + parts.length + ' ส่วน คลิกช่องใน EMR แล้วกด “พิมพ์บันทึกจากแอปทั้งหมด”'); }
+  } catch (_) {}
+}
+window.addEventListener('focus', autoLoad);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoLoad(); });
 $('#pasteBox').addEventListener('input', e => { if (e.target.value.trim()) load(e.target.value); });
 $('#clearBtn').onclick = () => {
   if (busy) return;
@@ -241,9 +258,9 @@ function setConn(st, name){
 function withTimeout(promise, ms, label){
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('หมดเวลา: ' + label)), ms))]);
 }
-async function openGatt(device){
+async function openGatt(device, tries = 3){
   let lastErr;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= tries; attempt++) {
     try {
       msg('กำลังเชื่อมต่อกับบอร์ด (ครั้งที่ ' + attempt + ')...');
       const server = await withTimeout(device.gatt.connect(), 10000, 'เชื่อมต่อ');
@@ -269,9 +286,55 @@ function listenForTyped(svc){
     })
   ).catch(() => {});
 }
+/* ---------- connect, auto-reconnect, keep screen awake ---------- */
+let userDisconnect = false, wakeLock = null;
+async function keepAwake(on){
+  try {
+    if (on && 'wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (_) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && rxChar) keepAwake(true); });
+
+async function attach(device, tries){
+  if (!device._emrBound) {
+    device._emrBound = true;
+    device.addEventListener('gattserverdisconnected', () => onDrop(device));
+  }
+  setConn('wait');
+  const {svc, rx} = await openGatt(device, tries);
+  rxChar = rx; btDevice = device;
+  setConn('on', device.name);
+  listenForTyped(svc);
+  keepAwake(true);
+  try { localStorage.setItem('emrtyper.lastBoard', device.name || ''); } catch (_) {}
+}
+function onDrop(device){
+  rxChar = null; if (waiter) waiter('disconnected');
+  if (userDisconnect) { userDisconnect = false; keepAwake(false); setConn('off'); msg('ตัดการเชื่อมต่อแล้ว'); return; }
+  msg('สัญญาณหลุด กำลังเชื่อมต่อใหม่อัตโนมัติ...');
+  attach(device, 3).then(() => msg('เชื่อมต่อใหม่สำเร็จ'))
+    .catch(() => { keepAwake(false); setConn('off'); msg('เชื่อมต่อใหม่ไม่สำเร็จ ถอดเสียบบอร์ดแล้วกดเชื่อมต่อบอร์ด'); });
+}
+// Board this phone has used before: reconnect without the chooser when Chrome allows it.
+async function rememberedDevice(){
+  if (!navigator.bluetooth || !navigator.bluetooth.getDevices) return null;
+  try {
+    const list = await navigator.bluetooth.getDevices();
+    let last = ''; try { last = localStorage.getItem('emrtyper.lastBoard') || ''; } catch (_) {}
+    return list.find(d => last && d.name === last) || list.find(d => (d.name || '').startsWith('EMR-Typer')) || null;
+  } catch (_) { return null; }
+}
 $('#connectBtn').onclick = async () => {
-  if (btDevice && btDevice.gatt.connected) { btDevice.gatt.disconnect(); return; }
+  if (btDevice && btDevice.gatt.connected) { userDisconnect = true; btDevice.gatt.disconnect(); return; }
   if (!navigator.bluetooth) { msg('เบราว์เซอร์นี้เชื่อมต่อบอร์ดไม่ได้ ให้เปิดหน้านี้ใน Chrome บน Android'); return; }
+  const known = await rememberedDevice();
+  if (known) {
+    try { msg('กำลังเชื่อมต่อ ' + known.name + ' เครื่องเดิม...'); await attach(known, 1); msg('เชื่อมต่อแล้ว คลิกช่องใน EMR ก่อนกดพิมพ์'); return; }
+    catch (_) { msg('เชื่อมเครื่องเดิมไม่ได้ เลือกบอร์ดจากรายการ'); }
+  }
   let device;
   try {
     setConn('wait');
@@ -284,18 +347,11 @@ $('#connectBtn').onclick = async () => {
     return;
   }
   try {
-    device.addEventListener('gattserverdisconnected', () => {
-      rxChar = null; if (waiter) waiter('disconnected');
-      setConn('off'); msg('บอร์ดตัดการเชื่อมต่อแล้ว กดเชื่อมต่อใหม่');
-    });
-    const {svc, rx} = await openGatt(device);
-    rxChar = rx; btDevice = device;
-    setConn('on', device.name);
-    listenForTyped(svc);
-    msg(parts.length ? 'ใน EMR คลิกช่องที่จะพิมพ์ แล้วกดพิมพ์ทั้งหมด' : 'เชื่อมต่อแล้ว วางบันทึกจากแอปได้เลย');
+    await attach(device, 3);
+    msg(parts.length ? 'ใน EMR คลิกช่องที่จะพิมพ์ แล้วกดพิมพ์ทั้งหมด' : 'เชื่อมต่อแล้ว คลิกช่องใน EMR ก่อนกดพิมพ์');
   } catch (e) {
     setConn('off');
-    msg('เชื่อมต่อไม่สำเร็จ: ' + ((e && e.message) || 'ไม่ทราบสาเหตุ') + ' — ปิดแอป Bluefruit ถอดเสียบบอร์ดใหม่ แล้วลองอีกครั้ง');
+    msg('เชื่อมต่อไม่สำเร็จ: ' + ((e && e.message) || 'ไม่ทราบสาเหตุ') + ' — ถอดเสียบบอร์ดใหม่ ให้มือถืออยู่ใกล้บอร์ด แล้วลองอีกครั้ง');
   }
 };
 
@@ -351,12 +407,15 @@ async function sendParts(idxs){
     }
     msg('พิมพ์เสร็จแล้ว' + (skipped ? ' (มีบางตัวอักษรถูกข้าม ตรวจใน EMR)' : '') + (unconfirmed ? ' (บางส่วนไม่ได้รับยืนยันจากบอร์ด ตรวจใน EMR)' : '') +
         (multi ? ' ตัดแต่ละส่วนไปวางในช่องของ EMR แล้วลบเส้นคั่นออก' : '') + ' อย่าลืมกดบันทึกใน EMR');
+    if (multi) { try { await navigator.clipboard.writeText(''); } catch (_) {} }   // do not leave the note in the clipboard
   } catch (e) {
     parts.forEach(p => { if (p.state === 'typing') p.state = 'idle'; });
     msg('ส่งไม่สำเร็จ: ' + ((e && e.message) || 'ลองเชื่อมต่อใหม่'));
   } finally { busy = false; refresh(); }
 }
 refresh();
+autoLoad();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
 </html>
